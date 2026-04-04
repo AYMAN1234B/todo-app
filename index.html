@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>My Tasks</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+
+    <div class="top-bar">
+      <div class="app-title">My tasks</div>
+      <button class="dark-toggle" onclick="toggleDark()">Dark mode</button>
+    </div>
+
+    <div class="search-row">
+      <input type="text" id="search-input" placeholder="Search tasks..." oninput="render()" />
+    </div>
+
+    <div class="add-form">
+      <div class="form-row">
+        <input type="text" id="task-input" placeholder="Add a new task..." maxlength="80" />
+        <select id="priority-select">
+           <option value="moderate">Moderate</option>
+           <option value="critical">Critical</option>
+           <option value="minor">Minor</option>
+        </select>
+        <input type="date" id="due-date" />
+        <button class="add-btn" onclick="addTask()">Add</button>
+      </div>
+      <div class="category-row" id="cat-row">
+        <button class="cat-btn active" onclick="setCat('All', this)">All</button>
+        <button class="cat-btn" onclick="setCat('Work', this)">Work</button>
+        <button class="cat-btn" onclick="setCat('Personal', this)">Personal</button>
+        <button class="cat-btn" onclick="setCat('Study', this)">Study</button>
+        <button class="cat-btn" onclick="setCat('Health', this)">Health</button>
+        <button class="cat-btn" onclick="setCat('Finance', this)">Finance</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Total</div><div class="stat-value" id="stat-total">0</div></div>
+      <div class="stat"><div class="stat-label">Done</div><div class="stat-value" id="stat-done">0</div></div>
+      <div class="stat"><div class="stat-label">Remaining</div><div class="stat-value" id="stat-remaining">0</div></div>
+      <div class="stat"><div class="stat-label">Overdue</div><div class="stat-value" id="stat-overdue">0</div></div>
+    </div>
+
+    <div class="filter-row">
+      <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
+      <button class="filter-btn" onclick="setFilter('active', this)">Active</button>
+      <button class="filter-btn" onclick="setFilter('done', this)">Done</button>
+      <button class="filter-btn" onclick="setFilter('overdue', this)">Overdue</button>
+      <button class="filter-btn" onclick="setFilter('high', this)">High priority</button>
+    </div>
+
+    <div class="task-list" id="task-list"></div>
+
+    <div class="bottom-row">
+      <button class="bottom-btn clear-btn" onclick="clearDone()">Clear completed</button>
+      <button class="bottom-btn" onclick="toggleHistory()">View history</button>
+    </div>
+
+    <div class="history-panel" id="history-panel" style="display:none"></div>
+
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
