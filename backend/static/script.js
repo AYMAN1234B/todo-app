@@ -1,5 +1,9 @@
-let tasks = JSON.parse(localStorage.getItem('todo-ult') || '[]');
-let history = JSON.parse(localStorage.getItem('todo-ult-hist') || '[]');
+// ── Config ──────────────────────────────────────────────
+const API = "http://localhost:5000";
+
+// ── State ───────────────────────────────────────────────
+let tasks = [];
+let history = [];
 let filter = 'all';
 let activeCat = 'All';
 let expanded = {};
@@ -7,14 +11,15 @@ let showHistory = false;
 let dark = localStorage.getItem('todo-dark') === 'true';
 let dragSrc = null;
 
-if (dark) {
-  document.getElementById('app').classList.add('dark');
-  document.body.classList.add('dark');
-}
+// ── Dark mode (keep in localStorage — it's just a preference) ──
+document.addEventListener('DOMContentLoaded', () => {
+  if (dark) {
+    document.getElementById('app').classList.add('dark');
+    document.body.classList.add('dark');
+  }
+});
 
-function save() {
-  localStorage.setItem('todo-ult', JSON.stringify(tasks));
-  localStorage.setItem('todo-ult-hist', JSON.stringify(history));
+function saveDark() {
   localStorage.setItem('todo-dark', dark);
 }
 
@@ -23,8 +28,29 @@ function toggleDark() {
   document.getElementById('app').classList.toggle('dark', dark);
   document.body.classList.toggle('dark', dark);
   document.querySelector('.dark-toggle').textContent = dark ? 'Light mode' : 'Dark mode';
-  save();
+  saveDark();
 }
+
+// ── API helpers ─────────────────────────────────────────
+async function apiFetch(path, options = {}) {
+  const res = await fetch(API + path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ── Load all data from server ───────────────────────────
+async function loadAll() {
+  [tasks, history] = await Promise.all([
+    apiFetch("/tasks"),
+    apiFetch("/history"),
+  ]);
+  render();
+}
+
+// ── Category & filter ───────────────────────────────────
 function setCat(cat, btn) {
   activeCat = cat;
   document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
@@ -39,6 +65,7 @@ function setFilter(f, btn) {
   render();
 }
 
+// ── Date helpers ─────────────────────────────────────────
 function isOverdue(due) {
   if (!due) return false;
   return new Date(due) < new Date(new Date().toDateString());
@@ -55,39 +82,43 @@ function fmtDate(due) {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
-function addTask() {
+// ── Task actions ─────────────────────────────────────────
+async function addTask() {
   const input = document.getElementById('task-input');
   const text = input.value.trim();
   if (!text) return;
   const cat = activeCat === 'All' ? 'General' : activeCat;
   const priority = document.getElementById('priority-select').value;
   const due = document.getElementById('due-date').value;
-  tasks.push({ id: Date.now(), text, done: false, cat, priority, due, subtasks: [] });
-  input.value = '';
-  save();
-  render();
-}
 
-function toggle(id) {
-  tasks = tasks.map(t => {
-    if (t.id !== id) return t;
-    if (!t.done) {
-      history.unshift({ ...t, deletedAt: new Date().toLocaleDateString() });
-      if (history.length > 50) history = history.slice(0, 50);
-    }
-    return { ...t, done: !t.done };
+  const newTask = await apiFetch("/tasks", {
+    method: "POST",
+    body: JSON.stringify({ text, cat, priority, due, subtasks: [] }),
   });
-  save();
+
+  tasks.push(newTask);
+  input.value = '';
   render();
 }
 
-function remove(id) {
-  const t = tasks.find(t => t.id === id);
-  if (t) {
-    history.unshift({ ...t, deletedAt: new Date().toLocaleDateString() });
-  }
+async function toggle(id) {
+  const task = tasks.find(t => t.id === id);
+  if (!task) return;
+  const updated = await apiFetch(`/tasks/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...task, done: !task.done }),
+  });
+  tasks = tasks.map(t => t.id === id ? updated : t);
+
+  // Refresh history in case task was completed (backend may log it)
+  history = await apiFetch("/history");
+  render();
+}
+
+async function remove(id) {
+  await apiFetch(`/tasks/${id}`, { method: "DELETE" });
   tasks = tasks.filter(t => t.id !== id);
-  save();
+  history = await apiFetch("/history");
   render();
 }
 
@@ -100,11 +131,18 @@ function startEdit(id) {
   range.selectNodeContents(el);
   window.getSelection().removeAllRanges();
   window.getSelection().addRange(range);
-  el.onblur = () => {
+
+  el.onblur = async () => {
     const newText = el.innerText.trim();
-    if (newText) tasks = tasks.map(t => t.id === id ? { ...t, text: newText } : t);
+    if (newText) {
+      const task = tasks.find(t => t.id === id);
+      const updated = await apiFetch(`/tasks/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ ...task, text: newText }),
+      });
+      tasks = tasks.map(t => t.id === id ? updated : t);
+    }
     el.contentEditable = false;
-    save();
     render();
   };
   el.onkeydown = e => {
@@ -117,48 +155,52 @@ function toggleExpand(id) {
   render();
 }
 
-function addSubtask(id) {
+async function addSubtask(id) {
   const input = document.getElementById('sub-' + id);
   const text = input.value.trim();
   if (!text) return;
-  tasks = tasks.map(t => t.id === id
-    ? { ...t, subtasks: [...(t.subtasks || []), { id: Date.now(), text, done: false }] }
-    : t
-  );
+  const task = tasks.find(t => t.id === id);
+  const newSubs = [...(task.subtasks || []), { id: Date.now(), text, done: false }];
+  const updated = await apiFetch(`/tasks/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...task, subtasks: newSubs }),
+  });
+  tasks = tasks.map(t => t.id === id ? updated : t);
   input.value = '';
   expanded[id] = true;
-  save();
   render();
 }
 
-function toggleSub(tid, sid) {
-  tasks = tasks.map(t => t.id === tid
-    ? { ...t, subtasks: t.subtasks.map(s => s.id === sid ? { ...s, done: !s.done } : s) }
-    : t
-  );
-  save();
-  render();
-}
-
-function removeSub(tid, sid) {
-  tasks = tasks.map(t => t.id === tid
-    ? { ...t, subtasks: t.subtasks.filter(s => s.id !== sid) }
-    : t
-  );
-  save();
-  render();
-}
-
-function clearDone() {
-  tasks.filter(t => t.done).forEach(t => {
-    history.unshift({ ...t, deletedAt: new Date().toLocaleDateString() });
+async function toggleSub(tid, sid) {
+  const task = tasks.find(t => t.id === tid);
+  const newSubs = task.subtasks.map(s => s.id === sid ? { ...s, done: !s.done } : s);
+  const updated = await apiFetch(`/tasks/${tid}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...task, subtasks: newSubs }),
   });
-  tasks = tasks.filter(t => !t.done);
-  if (history.length > 50) history = history.slice(0, 50);
-  save();
+  tasks = tasks.map(t => t.id === tid ? updated : t);
   render();
 }
 
+async function removeSub(tid, sid) {
+  const task = tasks.find(t => t.id === tid);
+  const newSubs = task.subtasks.filter(s => s.id !== sid);
+  const updated = await apiFetch(`/tasks/${tid}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...task, subtasks: newSubs }),
+  });
+  tasks = tasks.map(t => t.id === tid ? updated : t);
+  render();
+}
+
+async function clearDone() {
+  await apiFetch("/tasks/clear-done", { method: "DELETE" });
+  tasks = tasks.filter(t => !t.done);
+  history = await apiFetch("/history");
+  render();
+}
+
+// ── History ──────────────────────────────────────────────
 function toggleHistory() {
   showHistory = !showHistory;
   document.getElementById('history-panel').style.display = showHistory ? 'block' : 'none';
@@ -166,12 +208,10 @@ function toggleHistory() {
   if (showHistory) renderHistory();
 }
 
-function restoreTask(hid) {
-  const item = history.find(h => h.id === hid);
-  if (!item) return;
-  tasks.push({ id: Date.now(), text: item.text, done: false, cat: item.cat, priority: item.priority, due: item.due, subtasks: item.subtasks || [] });
+async function restoreTask(hid) {
+  const restored = await apiFetch(`/history/${hid}/restore`, { method: "POST" });
+  tasks.push(restored);
   history = history.filter(h => h.id !== hid);
-  save();
   render();
   renderHistory();
 }
@@ -193,6 +233,7 @@ function renderHistory() {
     `).join('');
 }
 
+// ── Render ───────────────────────────────────────────────
 function render() {
   const list = document.getElementById('task-list');
   const search = document.getElementById('search-input').value.toLowerCase();
@@ -200,11 +241,11 @@ function render() {
   let filtered = tasks.filter(t => {
     const catMatch = activeCat === 'All' || t.cat === activeCat;
     const statusMatch =
-      filter === 'all' ? true :
-      filter === 'done' ? t.done :
+      filter === 'all'    ? true :
+      filter === 'done'   ? t.done :
       filter === 'active' ? !t.done :
-      filter === 'overdue' ? (!t.done && isOverdue(t.due)) :
-      filter === 'high' ? t.priority === 'high' : true;
+      filter === 'overdue'? (!t.done && isOverdue(t.due)) :
+      filter === 'high'   ? t.priority === 'critical' : true;
     const searchMatch = !search || t.text.toLowerCase().includes(search);
     return catMatch && statusMatch && searchMatch;
   });
@@ -213,6 +254,7 @@ function render() {
     const po = { critical: 0, moderate: 1, minor: 2 };
     if (!a.done && b.done) return -1;
     if (a.done && !b.done) return 1;
+    if (a.position !== b.position) return a.position - b.position;
     return (po[a.priority] || 1) - (po[b.priority] || 1);
   });
 
@@ -292,7 +334,7 @@ function render() {
   if (showHistory) renderHistory();
 }
 
-// Drag and drop
+// ── Drag and drop ────────────────────────────────────────
 function dragStart(e, id) {
   dragSrc = id;
   e.target.classList.add('dragging');
@@ -306,14 +348,19 @@ function dragOver(e) {
   e.currentTarget.classList.add('drag-over');
 }
 
-function drop(e, id) {
+async function drop(e, id) {
   e.preventDefault();
   if (dragSrc === id) return;
   const fromIdx = tasks.findIndex(t => t.id === dragSrc);
-  const toIdx = tasks.findIndex(t => t.id === id);
-  const moved = tasks.splice(fromIdx, 1)[0];
+  const toIdx   = tasks.findIndex(t => t.id === id);
+  const moved   = tasks.splice(fromIdx, 1)[0];
   tasks.splice(toIdx, 0, moved);
-  save();
+
+  // Persist new order to server
+  await apiFetch("/tasks/reorder", {
+    method: "PUT",
+    body: JSON.stringify({ order: tasks.map(t => t.id) }),
+  });
   render();
 }
 
@@ -322,10 +369,11 @@ function dragEnd(e) {
   document.querySelectorAll('.task-card').forEach(c => c.classList.remove('drag-over'));
 }
 
-// Enter key to add task
-document.getElementById('task-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') addTask();
+// ── Enter key to add task ────────────────────────────────
+// ── Boot ─────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('task-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addTask();
+  });
+  loadAll();
 });
-
-// Initial render
-render();

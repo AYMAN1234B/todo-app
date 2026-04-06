@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>My Tasks</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+  <script src ="/static/script.js"></script>
 </head>
 <body>
   <div class="app" id="app">
@@ -64,6 +65,6 @@
     <div class="history-panel" id="history-panel" style="display:none"></div>
 
   </div>
-  <script src="script.js"></script>
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
